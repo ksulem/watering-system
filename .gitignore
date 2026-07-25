@@ -1,0 +1,30 @@
+# Secrets — real credentials live only in these, never commit them
+.env
+pi_client/.env
+
+# Local tool/session state — machine-specific, not shared project config
+.claude/settings.local.json
+
+# Generated at runtime, not source
+scripts/*.log
+scripts/shape-config.json
+pi_client/executed_commands.db
+pi_client/*.db-journal
+pi_client/*.db-wal
+pi_client/*.db-shm
+
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+*.egg-info/
+
+# Node (mini-app, once it exists)
+node_modules/
+dist/
+.env.local
+
+# OS cruft
+.DS_Store
+Thumbs.db

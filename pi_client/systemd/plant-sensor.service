@@ -1,0 +1,19 @@
+[Unit]
+Description=Plant Sensor Reader
+
+[Service]
+Type=simple
+ExecStart=/home/kwhatever/plant-monitor/pi_client/venv/bin/python3 /home/kwhatever/plant-monitor/pi_client/sensor_reader.py
+WorkingDirectory=/home/kwhatever/plant-monitor/pi_client
+User=kwhatever
+EnvironmentFile=/home/kwhatever/plant-monitor/pi_client/.env
+Restart=on-failure
+RestartSec=10
+# sensor_reader runs <= 60s per invocation; if it hangs past 90s, kill it so
+# the next timer tick can fire. Hangs typically come from blocked SPI or a
+# wedged TLS handshake — neither benefits from waiting.
+# RuntimeMaxSec, NOT TimeoutStartSec: with Type=simple, "startup" completes at
+# exec, so TimeoutStartSec would never fire and a wedged run would stay active
+# forever. RuntimeMaxSec bounds total runtime; the kill counts as failure, so
+# Restart=on-failure relaunches it and the timer re-arms on that activation.
+RuntimeMaxSec=90

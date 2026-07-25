@@ -1,0 +1,43 @@
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    environment:
+      POSTGRES_DB: plantmonitor
+      POSTGRES_USER: plantuser
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    # Default TimescaleDB tuning targets the host's full detected memory
+    # (autotune reads container limits, not a fixed default) - on this 1GB
+    # VM that's too aggressive for a box also running Mosquitto/Consumer/
+    # API/Bot/Nginx. Cap shared_buffers explicitly instead of trusting
+    # autotune. Revisit these once/if this migrates to the 6GB Ampere box.
+    command:
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - effective_cache_size=256MB
+      - -c
+      - max_connections=40
+      - -c
+      - work_mem=4MB
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"   # close externally after setup
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U plantuser -d plantmonitor"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  migrate:
+    build: ./migrations
+    environment:
+      DATABASE_URL: postgresql+asyncpg://plantuser:${DB_PASSWORD}@timescaledb/plantmonitor
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    restart: "no"
+
+volumes:
+  timescaledb_data:

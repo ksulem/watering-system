@@ -1,0 +1,23 @@
+#!/usr/bin/env sh
+# Runs on `git commit` once `git config core.hooksPath .githooks` is set
+# (one-time per clone — see README's "Linting" section).
+set -eu
+
+# `pip install --user` on Windows puts console scripts (ruff.exe) under the
+# Python Scripts dir, which usually isn't on PATH by default. Append known
+# per-user pip script locations as a fallback rather than modifying the
+# user's actual system PATH - scoped only to this hook's own execution.
+if [ -n "${APPDATA:-}" ]; then
+    for d in "$APPDATA"/Python/Python3*/Scripts; do
+        [ -d "$d" ] && PATH="$PATH:$d"
+    done
+fi
+PATH="$PATH:$HOME/.local/bin"
+
+if ! command -v ruff >/dev/null 2>&1; then
+    echo "pre-commit: ruff not found on PATH — install with 'pip install -r requirements-dev.txt'" >&2
+    exit 1
+fi
+
+echo "pre-commit: running ruff check..."
+ruff check .

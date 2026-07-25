@@ -1,0 +1,2 @@
+spidev==3.6
+asyncio-mqtt==0.16.2

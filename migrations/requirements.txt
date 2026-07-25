@@ -1,0 +1,4 @@
+alembic==1.13.2
+sqlalchemy==2.0.32
+asyncpg==0.29.0
+sqlparse==0.5.1

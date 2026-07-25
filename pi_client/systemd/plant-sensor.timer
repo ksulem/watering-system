@@ -1,0 +1,16 @@
+[Unit]
+Description=Run sensor reader every 60 seconds
+
+[Timer]
+OnBootSec=10s
+# OnUnitActiveSec counts from the last activation START, not finish. Overlap is
+# still impossible (starting an already-active unit is a no-op), but an elapsed
+# timer does NOT re-arm until the unit's next activation — so a run that never
+# exits would silently stop ALL future ticks, not just delay one. The liveness
+# guard is RuntimeMaxSec=90 on the .service: it kills a hung run, the
+# on-failure restart re-activates the unit, and this timer re-arms. Do not
+# raise RuntimeMaxSec without reconsidering this 60s interval.
+OnUnitActiveSec=60s
+
+[Install]
+WantedBy=timers.target
