@@ -1,0 +1,21 @@
+# Per-device: scoped to own namespace only
+user pi_klwater
+topic write plant-monitor/260922ba-03f3-4c20-a7e4-1d7dbf8d9f42/readings
+topic write plant-monitor/260922ba-03f3-4c20-a7e4-1d7dbf8d9f42/events
+topic write plant-monitor/260922ba-03f3-4c20-a7e4-1d7dbf8d9f42/status
+topic read  plant-monitor/260922ba-03f3-4c20-a7e4-1d7dbf8d9f42/commands
+
+# Backend Consumer — read-only on inbound topics, no command-write capability.
+user backend_consumer
+topic read  plant-monitor/+/readings
+topic read  plant-monitor/+/events
+topic read  plant-monitor/+/status
+topic write health/check
+
+# Backend Command Dispatcher — write-only on commands, no inbound read access.
+# Splitting from backend_consumer enforces least privilege: a compromised
+# Consumer cannot publish commands, and a compromised Dispatcher cannot
+# exfiltrate readings.
+user backend_dispatcher
+topic write plant-monitor/+/commands
+topic write health/check

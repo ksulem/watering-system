@@ -8,7 +8,7 @@ import sys
 from datetime import UTC, datetime
 from uuid import uuid4
 
-from asyncio_mqtt import Client, MqttError, TLSParameters
+from aiomqtt import Client, MqttError, TLSParameters
 from sensors.adc import ADCSensor
 
 DEVICE_ID = os.environ["DEVICE_ID"]

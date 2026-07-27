@@ -1,6 +1,8 @@
 # Secrets — real credentials live only in these, never commit them
 .env
 pi_client/.env
+mosquitto/certs/
+mosquitto/passwd
 
 # Local tool/session state — machine-specific, not shared project config
 .claude/settings.local.json
@@ -8,6 +10,7 @@ pi_client/.env
 # Generated at runtime, not source
 scripts/*.log
 scripts/shape-config.json
+scripts/.mqtt-creds-tmp
 pi_client/executed_commands.db
 pi_client/*.db-journal
 pi_client/*.db-wal

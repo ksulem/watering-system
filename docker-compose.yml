@@ -39,5 +39,44 @@ services:
         condition: service_healthy
     restart: "no"
 
+  mosquitto:
+    image: eclipse-mosquitto:2
+    ports:
+      - "8883:8883"     # external TLS — Pi devices
+      # 1883 not exposed externally — Docker network only
+    environment:
+      MQTT_CONSUMER_PASSWORD: ${MQTT_CONSUMER_PASSWORD}
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - ./mosquitto/passwd:/mosquitto/config/passwd:ro
+      - ./mosquitto/acl:/mosquitto/config/acl:ro
+      - ./mosquitto/certs:/mosquitto/certs:ro
+      - mosquitto_data:/mosquitto/data
+    healthcheck:
+      test: ["CMD-SHELL", "mosquitto_pub -h 127.0.0.1 -p 1883 -u backend_consumer -P $$MQTT_CONSUMER_PASSWORD -t 'health/check' -m '1' -q 0"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  cmd_dispatcher:
+    build: ./cmd_dispatcher
+    environment:
+      # Plain postgresql:// - this service uses asyncpg directly (not
+      # SQLAlchemy), which doesn't understand the "+asyncpg" dialect prefix
+      # that migrate's DATABASE_URL uses.
+      DATABASE_URL: postgresql://plantuser:${DB_PASSWORD}@timescaledb/plantmonitor
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      MQTT_DISPATCHER_USERNAME: backend_dispatcher
+      MQTT_DISPATCHER_PASSWORD: ${MQTT_DISPATCHER_PASSWORD}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      mosquitto:
+        condition: service_healthy
+    restart: unless-stopped
+
 volumes:
   timescaledb_data:
+  mosquitto_data:
