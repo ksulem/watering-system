@@ -16,6 +16,17 @@ def test_read_mcp3008_bit_math(monkeypatch, raw_bytes, expected):
     assert adc.read_mcp3008(0) == expected
 
 
+def test_spi_bus_is_warmed_up_at_import():
+    # Regression, found during the Phase 4 cutover on 2026-08-07: the first
+    # xfer2 after a fresh open() returns ~0 regardless of the sensor, so the
+    # first channel read by each 60s run was being logged as a fabricated 100%
+    # moisture. adc.py discards one conversion at import to absorb it.
+    # _spi is the MagicMock conftest installs for spidev, so the import-time
+    # call is recorded on it; every other test monkeypatches xfer2, leaving this
+    # as the only call on the underlying mock.
+    adc._spi.xfer2.assert_called_once_with([1, 8 << 4, 0])
+
+
 @pytest.mark.parametrize("channel", [-1, 8, 100])
 def test_read_mcp3008_rejects_invalid_channel(channel):
     with pytest.raises(ValueError):

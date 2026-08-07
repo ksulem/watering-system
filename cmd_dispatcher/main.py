@@ -1,5 +1,4 @@
 import asyncio
-import json
 import logging
 import os
 from datetime import timedelta
@@ -48,11 +47,16 @@ async def dispatch_loop(pool: asyncpg.Pool, mqtt: MQTTClient) -> None:
             """)
             for row in rows:
                 try:
+                    # payload is published as-is: asyncpg decodes jsonb to a
+                    # str, not a dict (there's no implicit codec), so the old
+                    # json.dumps(dict(...)) raised ValueError on the first real
+                    # command. Nothing created outbox rows until the Consumer
+                    # landed, so this never fired in Phase 3.
+                    #
                     # retain=False is mandatory — a retained water_now would be
                     # redelivered to the Pi on every reconnect and trigger watering
                     # for as long as the topic exists on the broker.
-                    await mqtt.publish(row["topic"], json.dumps(dict(row["payload"])),
-                                        qos=1, retain=False)
+                    await mqtt.publish(row["topic"], row["payload"], qos=1, retain=False)
                     # Update both tables in the same transaction — watering_events
                     # is the canonical lifecycle table queried by the API;
                     # command_outbox is dispatch state.

@@ -59,6 +59,60 @@ services:
       retries: 5
     restart: unless-stopped
 
+  api:
+    build: ./api
+    # No host port published on purpose. Session tokens over plain HTTP on a
+    # public IP would be sniffable, and there's still no domain to get a
+    # certificate for. Nginx + TLS in Phase 8 is what makes this reachable.
+    environment:
+      DATABASE_URL: postgresql://plantuser:${DB_PASSWORD}@timescaledb/plantmonitor
+      # Blank until the bot exists (Phase 6). While unset, /auth/session returns
+      # 503 and every other endpoint is locked — the API fails closed.
+      BOT_TOKEN: ${BOT_TOKEN:-}
+      OWNER_USER_ID: ${OWNER_USER_ID:-}
+      SESSION_SECRET: ${SESSION_SECRET:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    mem_limit: 256m
+    restart: unless-stopped
+
+  consumer:
+    build: ./consumer
+    environment:
+      # Plain postgresql:// for the same reason as cmd_dispatcher below - raw
+      # asyncpg, which rejects the "+asyncpg" SQLAlchemy dialect prefix.
+      DATABASE_URL: postgresql://plantuser:${DB_PASSWORD}@timescaledb/plantmonitor
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      MQTT_CONSUMER_USERNAME: backend_consumer
+      MQTT_CONSUMER_PASSWORD: ${MQTT_CONSUMER_PASSWORD}
+      # Unset until the bot exists (Phase 6): alerts are still written to the
+      # alerts table, only the Telegram push is skipped.
+      BOT_TOKEN: ${BOT_TOKEN:-}
+      OWNER_CHAT_ID: ${OWNER_CHAT_ID:-}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+      mosquitto:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8002/health', timeout=3)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    # A hard cap, not a reservation. On a 1 GB VM an unbounded leak here would
+    # push TimescaleDB into swap and take the whole stack down; better that the
+    # Consumer alone gets OOM-killed and restarted. Steady-state RSS is ~80 MB.
+    mem_limit: 256m
+    restart: unless-stopped
+
   cmd_dispatcher:
     build: ./cmd_dispatcher
     environment:

@@ -6,6 +6,17 @@ _spi = spidev.SpiDev()
 _spi.open(0, 0)
 _spi.max_speed_hz = 1350000
 
+# Throw away one conversion. The first xfer2 after a fresh open() reliably comes
+# back as ~0 no matter what the sensor reads — measured on this Pi as
+# [0, 636, 637, 636, 636] for five back-to-back reads of one channel.
+#
+# The legacy monitor.py never hit this: it opens the bus once and then reads for
+# months, so only its very first logged row was affected. sensor_reader.py is a
+# 60-second one-shot, so without this discard EVERY run records whichever
+# channel it reads first as ~0 — which calibrates to a fabricated 100% moisture
+# and would also stop auto-water from ever firing for that plant.
+_spi.xfer2([1, 8 << 4, 0])
+
 
 def read_mcp3008(channel: int) -> int:
     if channel < 0 or channel > 7:

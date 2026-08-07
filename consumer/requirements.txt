@@ -1,0 +1,5 @@
+asyncpg==0.29.0
+aiomqtt==2.5.1
+pydantic==2.9.2
+aiohttp==3.10.10
+prometheus-client==0.21.0
