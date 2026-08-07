@@ -4,11 +4,13 @@ pytest-asyncio==1.4.0
 aiomqtt==2.5.1
 sqlparse==0.5.1
 alembic==1.13.2
-# consumer/ and api/ tests. asyncpg and aiohttp are deliberately absent —
-# they're stubbed in the repo-root conftest.py, since nothing under test needs a
-# real driver and asyncpg ships no wheel for newer CPythons.
+# consumer/, api/ and bot/ tests. Only asyncpg is stubbed (no wheel for newest
+# CPython); aiohttp is real because aiogram imports it internally and breaks if
+# handed a mock. See the repo-root conftest.py.
 pydantic==2.9.2
 prometheus-client==0.21.0
 fastapi==0.115.4
 httpx==0.27.2
 PyJWT==2.9.0
+aiogram==3.15.0
+aiohttp==3.10.10

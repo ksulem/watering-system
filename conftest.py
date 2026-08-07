@@ -1,14 +1,19 @@
-"""Root conftest — runtime drivers that tests never actually exercise.
+"""Root conftest — stubs the one driver tests can't install.
 
-`asyncpg` and `aiohttp` are stubbed in `sys.modules` before any service package
-is imported. Every DB call and every outbound HTTP call under test is mocked, so
-the real drivers add nothing but install friction: asyncpg is a C extension with
-no wheel for the newest CPython, which would make `pytest` fail at collection on
-a dev machine. Same idea as pi_client's spidev stub.
+`asyncpg` is a C extension with no wheel for the newest CPython, so requiring it
+would make `pytest` fail at collection on a dev machine. Every DB call under
+test is mocked anyway, so a stub loses nothing. Same idea as pi_client's spidev
+stub.
 
-This lives at the repo root rather than in each tests/ directory because both
-`api/tests` and `consumer/tests` import modules that `import asyncpg` at module
-scope, and pytest loads the root conftest before either package is touched.
+`aiohttp` is deliberately NOT stubbed even though little under test uses it
+directly: aiogram imports it internally, and handing aiogram a MagicMock in
+place of a real HTTP library breaks its own imports. It installs cleanly
+everywhere, so it's a real dev dependency.
+
+This lives at the repo root rather than in each tests/ directory because
+`api/tests`, `bot/tests` and `consumer/tests` all import modules that
+`import asyncpg` at module scope, and pytest loads the root conftest before any
+of those packages is touched.
 """
 import sys
 from unittest.mock import MagicMock
@@ -19,7 +24,3 @@ _asyncpg = MagicMock()
 _asyncpg.PostgresError = type("PostgresError", (Exception,), {})
 _asyncpg.UniqueViolationError = type("UniqueViolationError", (_asyncpg.PostgresError,), {})
 sys.modules.setdefault("asyncpg", _asyncpg)
-
-_aiohttp = MagicMock()
-_aiohttp.ClientError = type("ClientError", (Exception,), {})
-sys.modules.setdefault("aiohttp", _aiohttp)

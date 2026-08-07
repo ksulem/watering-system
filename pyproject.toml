@@ -31,5 +31,5 @@ extend-immutable-calls = [
 "*/tests/*.py" = ["E402"]  # conftest.py sys.path insertion must precede test-module imports
 
 [tool.pytest.ini_options]
-testpaths = ["pi_client/tests", "migrations/tests", "consumer/tests", "api/tests"]
+testpaths = ["pi_client/tests", "migrations/tests", "consumer/tests", "api/tests", "bot/tests"]
 asyncio_mode = "auto"

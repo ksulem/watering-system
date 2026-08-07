@@ -1,0 +1,71 @@
+# Rendered at container start: nginx:alpine runs envsubst over
+# /etc/nginx/templates/*.template. NGINX_ENVSUBST_FILTER=DOMAIN restricts it to
+# ${DOMAIN} — without that filter it would also eat nginx's own $host,
+# $remote_addr and friends.
+
+server {
+    listen 80;
+    server_name ${DOMAIN};
+
+    # Let's Encrypt's HTTP-01 challenge. This must stay reachable on plain HTTP
+    # forever, not just at first issuance — renewals use the same path every 60
+    # days, so it is deliberately NOT redirected to HTTPS.
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${DOMAIN};
+
+    ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+
+    ssl_protocols       TLSv1.2 TLSv1.3;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache   shared:SSL:10m;
+    ssl_session_timeout 1d;
+
+    # Telegram will not load a Mini App from a host that fails TLS, and the
+    # session token in Authorization must never travel in clear.
+    add_header Strict-Transport-Security "max-age=31536000" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-Frame-Options "SAMEORIGIN" always;
+
+    # Largest legitimate request is a JSON config patch. Anything bigger is a
+    # mistake or an attack; reject it at the edge rather than in uvicorn.
+    client_max_body_size 64k;
+
+    location /api/ {
+        proxy_pass http://api:8000/;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Telegram webhook. Authenticity is enforced by the bot, not here: Telegram
+    # sends X-Telegram-Bot-Api-Secret-Token and aiogram 401s on a mismatch, so
+    # forged posts to this public path never reach a handler.
+    location = /webhook {
+        proxy_pass http://bot:8001/webhook;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # /app (Mini App, Phase 7) gets added here once it exists. It is omitted on
+    # purpose: nginx resolves proxy_pass hostnames at startup, so a block
+    # pointing at a container that doesn't exist yet would stop nginx booting.
+
+    location = /health {
+        proxy_pass http://api:8000/health;
+    }
+}

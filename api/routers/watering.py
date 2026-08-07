@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from typing import Literal
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -74,7 +75,13 @@ async def patch_config(plant_id: int, body: WateringConfigPatch):
 
 @router.post("/plants/{plant_id}/water", response_model=CommandCreatedOut,
              status_code=status.HTTP_202_ACCEPTED)
-async def water_now(plant_id: int):
+async def water_now(
+    plant_id: int,
+    # Recorded in watering_events.triggered_by so history distinguishes a tap in
+    # the Mini App from a /water command in the bot. 'auto' is not accepted —
+    # only the Consumer's threshold logic may claim that.
+    triggered_by: Literal["manual", "bot"] = "manual",
+):
     """Queue a manual watering.
 
     202, not 201: this only writes an outbox row. The Dispatcher publishes it,
@@ -96,7 +103,7 @@ async def water_now(plant_id: int):
         plant_id=plant_id,
         device_id=config["device_id"],
         command_id=command_id,
-        triggered_by="manual",
+        triggered_by=triggered_by,
         duration_sec=config["duration_sec"],
         relay_channel=config["relay_channel"],
         expires_at=datetime.now(UTC) + COMMAND_TTL,

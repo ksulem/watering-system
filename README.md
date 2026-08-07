@@ -14,7 +14,54 @@ Full architecture, database schema, MQTT topic contracts, and the phased build p
 | 3 | Mosquitto + Command Dispatcher | Done — self-signed CA (IP SAN, no domain yet), per-user ACLs, `cmd_dispatcher/` polling `command_outbox` (idle — nothing creates commands until relays exist and a watering_config row is created). |
 | 4 | Consumer | Done — `consumer/` validates and persists readings/events/status to TimescaleDB, applies server-side calibration, raises threshold alerts and decides auto-watering. Deployed and verified end-to-end: the Pi's readings land in `sensor_readings`. |
 | 5 | FastAPI | Done — `api/` serves all plant/reading/watering/sensor/alert endpoints behind Telegram session auth. Deployed on the Docker network only (no published port). **Auth credentials are not set yet**, so it currently answers `/health` and locks everything else — see below. |
-| 6+ | Bot, Mini App | Not started. |
+| 6 | Telegram Bot | Done — `@WateringKLBot` on webhooks, serving `/start`, `/status` and `/water`. Deployed and verified through the real webhook path. |
+| 7 | Mini App | Not started. The bot's dashboard button stays hidden until `MINI_APP_URL` is set, rather than linking to a 404. |
+| 8 | Nginx + TLS | Done — `https://wateringkl.org` serves the API behind a real Let's Encrypt certificate, with automated renewal. Log caps, resource limits and DB backups from Phase 8 are still outstanding. |
+
+## Public endpoint
+
+`https://wateringkl.org` → `92.5.47.47`. Domain registered at Cloudflare; DNS is
+Cloudflare's, and the A record is **DNS-only (grey cloud), deliberately not proxied** —
+proxying would break MQTT on 8883 and interfere with certificate renewal.
+
+Only Nginx is exposed. The API, Consumer, Dispatcher, broker and database have no
+published host ports and are reachable only on the Docker network.
+
+| Path | Goes to |
+|---|---|
+| `/health` | API health check (unauthenticated) |
+| `/api/…` | FastAPI on `api:8000` |
+| `/webhook` | Telegram bot — **added in Phase 6** |
+| `/app` | Mini App static files — **added in Phase 7** |
+
+The last two are intentionally absent from `nginx/default.conf.template`: nginx resolves
+`proxy_pass` hostnames at startup, so a block pointing at a container that doesn't exist
+yet would stop nginx booting at all.
+
+### Setting this up from scratch
+
+1. Point an `A` record at the VPS.
+2. Open 80 and 443 in the OCI security list. The host's iptables `INPUT` chain rejects
+   everything but SSH and does *not* need changing — Docker-published ports are handled
+   in the `FORWARD`/`DOCKER` chains and bypass `INPUT`. (Which is also why 8883 works.)
+3. Set `DOMAIN` and `LETSENCRYPT_EMAIL` in `.env`, then run
+   `./scripts/init-letsencrypt.sh`. Rehearse with `STAGING=1` first — production
+   Let's Encrypt allows only 5 failures per hour.
+4. `docker compose --profile web up -d nginx`. Nginx sits behind a compose profile so a
+   plain `docker compose up -d` can never start it half-configured.
+
+Two deviations from the plan document, both deliberate:
+
+- The plan uses `certbot --nginx`. That plugin rewrites a *host* nginx's configuration,
+  but nginx here runs in a container holding port 80, so renewals would need it stopped
+  every 60 days. `init-letsencrypt.sh` uses the webroot method, which leaves nginx up.
+- The script checks DNS against a public resolver (`dig @1.1.1.1`), not the local one. A
+  resolver that queried the name *before* it was registered caches the NXDOMAIN for the
+  zone's negative TTL — 30 minutes on a fresh Cloudflare zone — long after the record is
+  live everywhere else. Let's Encrypt resolves from its own servers, so the local cache
+  is irrelevant and actively misleading. Use
+  `curl --resolve wateringkl.org:443:92.5.47.47 …` to test from a machine with a stale
+  cache.
 
 ### The API is deployed but locked
 
@@ -50,6 +97,8 @@ pi_client/        Code that runs on the Raspberry Pi (sensors, systemd units)
 consumer/         Subscribes to MQTT, validates payloads, writes to TimescaleDB,
                   calibrates readings, raises alerts, decides auto-watering
 api/              FastAPI: plants, readings, watering, sensors, alerts
+bot/              Telegram bot (aiogram) — /status, /water, on webhooks
+nginx/            TLS termination and routing (compose profile "web")
 cmd_dispatcher/   Polls command_outbox, publishes commands to MQTT
 mosquitto/        Broker config + ACLs (certs/ and passwd are gitignored — see Secrets)
 scripts/          One-off ops tooling (Oracle instance retry-launch script)
@@ -102,6 +151,85 @@ docker exec plant-monitor-consumer-1 python -c \
 the gap between them is QoS-1 redeliveries that `processed_sensor_events` deduplicated,
 which is normal. A rising `mqtt_dead_letters_total` or `mqtt_unknown_sensor_total` is not
 — inspect the `dead_letters` table, which keeps the raw payload for 30 days.
+
+## Backups
+
+Nightly `pg_dump` to Oracle Object Storage (`plant-monitor-backups`), via
+`scripts/backup-db.sh`.
+
+**No credential lives on the VPS.** The script authenticates by *instance principal*:
+the VM's identity is asserted by Oracle's metadata service, and an IAM policy grants the
+`plant-monitor-vm` dynamic group — whose only member is this VM — permission to write to
+that one bucket and nothing else. There is no key to steal if the box is compromised, and
+access is revoked by deleting the policy.
+
+Retention is a server-side Object Storage lifecycle rule (delete under `daily/` after 30
+days) rather than script logic, so a broken script can't silently stop expiring dumps.
+Three recent copies are also kept in `/var/backups/plant-monitor` for a fast restore; the
+bucket is the real backup.
+
+The script fails loudly rather than uploading something useless. It rejects a dump under
+5 kB, runs `pg_restore --list` to prove the archive's table of contents actually parses
+(a truncated dump fails here, not on the day you need it), and after uploading it re-reads
+the object's size from Object Storage to confirm the bytes really landed.
+
+### Restoring
+
+TimescaleDB needs more than a plain `pg_restore` — skipping the pre/post steps corrupts
+the hypertable catalog, and the restore *appears* to succeed before chunk routing starts
+misbehaving:
+
+```bash
+oci os object get --auth instance_principal -bn plant-monitor-backups \
+    --name daily/plantmonitor-<stamp>.dump --file restore.dump
+createdb -U plantuser plantmonitor_restore
+psql -U plantuser -d plantmonitor_restore -c "CREATE EXTENSION timescaledb;"
+psql -U plantuser -d plantmonitor_restore -c "SELECT timescaledb_pre_restore();"
+pg_restore -U plantuser -d plantmonitor_restore --no-owner restore.dump
+psql -U plantuser -d plantmonitor_restore -c "SELECT timescaledb_post_restore();"
+```
+
+### How much space this needs
+
+Effectively none, which is worth stating because it's counterintuitive. The whole
+database is **under 1 MB** — `sensor_readings` holds ~2,000 rows in 400 kB. At 7,624
+rows/day the uncompressed projection is ~548 MB/year, but compression kicks in at 30 days
+and a 12-month retention policy drops older chunks, so it plateaus around 50–100 MB.
+Thirty daily dumps sit comfortably inside the Always Free 20 GB Object Storage
+allowance — roughly 0.15% of it.
+
+The thing that *does* grow here is Docker build cache: every image rebuild adds layers.
+`/etc/cron.d/plantmonitor-docker-prune` clears it weekly. Note it prunes **build cache
+only** — `docker image prune -a` must never be used on this host, because
+`certbot/certbot` shows zero containers (the renewal cron runs it with `--rm`) and would
+be deleted along with the certificate renewal tooling.
+
+### The bot
+
+`@WateringKLBot`, on webhooks at `https://wateringkl.org/webhook`. Three design points
+worth knowing:
+
+- **It holds no database credentials.** Everything goes through the API over the Docker
+  network, so the watering rules — mode check, in-flight-command guard, the plant-row
+  lock — have one implementation rather than a third copy that could drift.
+- **It signs its own session tokens** with `SESSION_SECRET` instead of calling
+  `/auth/session`, which only a Mini App can satisfy (it validates Telegram initData).
+  Both processes are server-side and equally trusted.
+  `bot/tests/test_api_client.py` asserts what the bot mints is exactly what the API's
+  verifier accepts, so the two can't drift apart silently.
+- **`WEBHOOK_SECRET` is mandatory**, and the bot refuses to start without it. `/webhook`
+  on a known domain is trivially guessable; Telegram echoes the secret in
+  `X-Telegram-Bot-Api-Secret-Token` and aiogram returns 401 on a mismatch, so forged
+  updates never reach a handler. Verified: a POST with no secret, and one with a wrong
+  secret, are both rejected.
+
+`OwnerOnlyMiddleware` is registered on the dispatcher rather than per-router, so a
+handler added later cannot forget the owner check. Non-owner updates are answered with
+200 (Telegram must not be told to retry) but dropped before any handler runs.
+
+To drive the real webhook path without using Telegram, pipe a script into the container
+so it can read `WEBHOOK_SECRET` from its own environment — the same trick the API smoke
+test uses.
 
 ### Exercising the API against real data
 

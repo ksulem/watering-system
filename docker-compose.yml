@@ -1,6 +1,17 @@
+# Bound container log size. The default json-file driver grows without limit —
+# one crash-looping service can fill the disk overnight, which on this box would
+# take TimescaleDB down with it. 10 MB x 3 files per service caps the worst case
+# at ~240 MB across all eight.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   timescaledb:
     image: timescale/timescaledb:latest-pg16
+    logging: *default-logging
     environment:
       POSTGRES_DB: plantmonitor
       POSTGRES_USER: plantuser
@@ -32,6 +43,7 @@ services:
 
   migrate:
     build: ./migrations
+    logging: *default-logging
     environment:
       DATABASE_URL: postgresql+asyncpg://plantuser:${DB_PASSWORD}@timescaledb/plantmonitor
     depends_on:
@@ -41,6 +53,7 @@ services:
 
   mosquitto:
     image: eclipse-mosquitto:2
+    logging: *default-logging
     ports:
       - "8883:8883"     # external TLS — Pi devices
       # 1883 not exposed externally — Docker network only
@@ -61,6 +74,7 @@ services:
 
   api:
     build: ./api
+    logging: *default-logging
     # No host port published on purpose. Session tokens over plain HTTP on a
     # public IP would be sniffable, and there's still no domain to get a
     # certificate for. Nginx + TLS in Phase 8 is what makes this reachable.
@@ -85,6 +99,7 @@ services:
 
   consumer:
     build: ./consumer
+    logging: *default-logging
     environment:
       # Plain postgresql:// for the same reason as cmd_dispatcher below - raw
       # asyncpg, which rejects the "+asyncpg" SQLAlchemy dialect prefix.
@@ -115,6 +130,7 @@ services:
 
   cmd_dispatcher:
     build: ./cmd_dispatcher
+    logging: *default-logging
     environment:
       # Plain postgresql:// - this service uses asyncpg directly (not
       # SQLAlchemy), which doesn't understand the "+asyncpg" dialect prefix
@@ -129,6 +145,61 @@ services:
         condition: service_completed_successfully
       mosquitto:
         condition: service_healthy
+    restart: unless-stopped
+
+  bot:
+    build: ./bot
+    logging: *default-logging
+    environment:
+      BOT_TOKEN: ${BOT_TOKEN:?BOT_TOKEN is required to run the bot}
+      OWNER_USER_ID: ${OWNER_USER_ID:?OWNER_USER_ID is required to run the bot}
+      # Shared with the API: the bot signs its own session tokens rather than
+      # going through /auth/session, which only a Mini App can satisfy.
+      SESSION_SECRET: ${SESSION_SECRET:?SESSION_SECRET is required to run the bot}
+      API_BASE: http://api:8000
+      WEBHOOK_URL: https://${DOMAIN:?DOMAIN is required to run the bot}/webhook
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:?WEBHOOK_SECRET is required - generate with openssl rand -hex 32}
+      # Empty until Phase 7 serves the Mini App; the dashboard button is hidden
+      # rather than pointing at a 404.
+      MINI_APP_URL: ${MINI_APP_URL:-}
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "python -c \"import urllib.request; urllib.request.urlopen('http://localhost:8001/health', timeout=3)\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+    mem_limit: 192m
+    restart: unless-stopped
+
+  # TLS terminator and the only externally-reachable service. Not started until
+  # DOMAIN is set and scripts/init-letsencrypt.sh has issued a certificate —
+  # nginx won't boot without the cert files its config references.
+  nginx:
+    image: nginx:alpine
+    logging: *default-logging
+    profiles: ["web"]
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      DOMAIN: ${DOMAIN:-}
+      # Without this filter envsubst would also replace nginx's own $host,
+      # $remote_addr, $scheme ... with empty strings.
+      NGINX_ENVSUBST_FILTER: "DOMAIN"
+    volumes:
+      - ./nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /var/www/certbot:/var/www/certbot:ro
+    depends_on:
+      api:
+        condition: service_healthy
+      # nginx resolves proxy_pass hostnames at startup, so `bot` must already
+      # exist or nginx refuses to boot at all — not just for /webhook.
+      bot:
+        condition: service_healthy
+    mem_limit: 64m
     restart: unless-stopped
 
 volumes:
