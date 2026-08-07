@@ -67,9 +67,12 @@ def sent(monkeypatch):
     async def fake_notify(text: str) -> None:
         messages.append(text)
 
-    from consumer import alerts, event_handler
-    monkeypatch.setattr(alerts, "notify_telegram", fake_notify)
-    monkeypatch.setattr(event_handler, "notify_telegram", fake_notify)
+    # Each module does `from consumer.notify import notify_telegram`, binding
+    # its own name — so every importer has to be patched individually. A module
+    # missing here silently sends nothing and its test just sees an empty list.
+    from consumer import alerts, event_handler, sensor_health
+    for module in (alerts, event_handler, sensor_health):
+        monkeypatch.setattr(module, "notify_telegram", fake_notify)
     return messages
 
 
@@ -116,6 +119,13 @@ def status_payload(**overrides) -> dict:
     return payload
 
 
-def sensor_row(sensor_id: int = 1, plant_id: int | None = 1, label: str = "Монстера moisture"):
-    """asyncpg Records behave like read-only mappings; a dict is close enough."""
-    return {"id": sensor_id, "plant_id": plant_id, "label": label}
+def sensor_row(sensor_id: int = 1, plant_id: int | None = 1,
+               label: str = "Монстера moisture", address: str = "adc:5"):
+    """asyncpg Records behave like read-only mappings; a dict is close enough.
+
+    Keys must match exactly what get_sensor_by_device_address selects — a
+    Record raises KeyError for a column that wasn't in the SELECT, so a helper
+    with extra keys would hide a real bug.
+    """
+    return {"id": sensor_id, "plant_id": plant_id, "label": label,
+            "address": address}

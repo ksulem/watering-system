@@ -96,8 +96,11 @@ async def get_sensor_by_device_address(device_id: UUID, address: str, sensor_typ
     sensor_type arrives as a code string ('moisture'); `sensors` stores a
     sensor_type_id FK, hence the join.
     """
+    # address is selected even though the caller already knows it: sensor_health
+    # labels its metrics with it, and asyncpg Records raise KeyError rather than
+    # returning None for a column that wasn't selected.
     return await _x(conn).fetchrow("""
-        SELECT s.id, s.plant_id, s.label
+        SELECT s.id, s.plant_id, s.label, s.address
         FROM sensors s
         JOIN sensor_types st ON st.id = s.sensor_type_id
         WHERE s.device_id = $1 AND s.address = $2 AND st.code = $3

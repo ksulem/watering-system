@@ -16,7 +16,7 @@ from aiomqtt import Client as MQTTClient
 from aiomqtt import MqttError
 from pydantic import ValidationError
 
-from consumer import cleanup, db, event_handler, metrics, notify
+from consumer import cleanup, db, event_handler, metrics, notify, sensor_health
 from consumer.alerts import check_thresholds
 from consumer.auto_water import maybe_auto_water
 from consumer.calibration import calibrated_value
@@ -92,6 +92,22 @@ async def process_reading(msg: ReadingMessage) -> None:
             f"no sensors row for address={msg.address} sensor_type={msg.sensor_type}",
             "unknown_sensor")
         return
+
+    # Reject physically impossible raw values before they become a reading. A
+    # disconnected sensor floats near 0, which calibrates to a confident 100%
+    # moisture — the plant then looks watered, so no alert fires and auto-water
+    # never runs. Storing that is worse than storing nothing.
+    if msg.raw_adc is not None and not sensor_health.is_plausible(
+            msg.raw_adc, msg.sensor_type):
+        await sensor_health.record_fault(sensor, msg.raw_adc, msg.sensor_type)
+        await db.insert_dead_letter(
+            topic, msg.model_dump_json(),
+            f"raw_adc={msg.raw_adc} outside the plausible range for "
+            f"{msg.sensor_type} — sensor likely disconnected",
+            "implausible_reading")
+        return
+    if msg.raw_adc is not None:
+        await sensor_health.record_ok(sensor)
 
     # Calibration runs BEFORE the transaction on purpose. If it fails we
     # dead-letter, and doing that inside the transaction would commit the

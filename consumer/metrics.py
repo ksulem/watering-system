@@ -31,3 +31,10 @@ watering_commands_total = Counter(
 # Alerts
 alerts_sent_total = Counter(
     "alerts_sent_total", "Threshold alerts raised", ["alert_type"])
+
+# Sensor health. A rising count here means wiring, not weather — the reading was
+# outside anything a working sensor produces, so it was discarded rather than
+# stored as a false 100%.
+sensor_implausible_total = Counter(
+    "sensor_implausible_total", "Readings rejected as physically implausible",
+    ["address"])

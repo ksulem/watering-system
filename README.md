@@ -81,6 +81,27 @@ The Pi used to run a pre-existing script, `pi_client`-unrelated: `/home/kwhateve
 
 Its long-lived design also hid a bug that only surfaced once readings came from a 60-second one-shot: the first `xfer2` after a fresh `SpiDev.open()` returns ~0 regardless of the sensor, so whichever channel is read first would log a fabricated 100% moisture. `sensors/adc.py` now discards one conversion at import. See `test_spi_bus_is_warmed_up_at_import`.
 
+### Disconnected-sensor detection
+
+A capacitive sensor that comes unplugged leaves its ADC input floating, so it reads ~0 —
+which the calibration curve maps to a confident **100% moisture**. That is the most
+dangerous failure this system can have: the plant looks perfectly watered, so no
+low-moisture alert fires and auto-water never triggers. The plant dies quietly while the
+dashboard says it's fine.
+
+`consumer/sensor_health.py` refuses to store any raw value outside a plausible band
+(50–1015 for moisture — generous enough to catch broken wiring, not unusual soil). Such a
+reading is dead-lettered rather than discarded, so the raw fact survives for diagnosis.
+
+Alerts fire only after **three consecutive** bad reads. A single stray zero is usually an
+SPI bus glitch, and alerting on those would cry wolf several times a day; three in a row
+(~3.5 minutes) means someone pulled the sensor out. A Telegram push names the sensor and
+says readings are being discarded, with a 2-hour cooldown so a sensor left unplugged
+doesn't spam, and a recovery message when it reads normally again.
+
+Watch `sensor_implausible_total` in `/metrics` — a rising count there is wiring, not
+weather.
+
 ### Device status is still `offline`
 
 Nothing publishes to the `status` topic yet — that's `watering_controller.py`'s job (last-will + connect message), which is blocked on relay hardware. Until then `devices.status` stays `offline` and `last_seen_at` stays NULL even though readings are flowing. Liveness is observable from `sensor_readings.recorded_at` in the meantime.
