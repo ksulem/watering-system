@@ -24,3 +24,9 @@ _asyncpg = MagicMock()
 _asyncpg.PostgresError = type("PostgresError", (Exception,), {})
 _asyncpg.UniqueViolationError = type("UniqueViolationError", (_asyncpg.PostgresError,), {})
 sys.modules.setdefault("asyncpg", _asyncpg)
+
+# pi_client/test_relay.py is a bench script run by hand on the Pi, not a test —
+# it just happens to match pytest's `test_*.py` default. `testpaths` already
+# keeps it out of a bare `pytest` run; this also covers `pytest pi_client`, where
+# it would otherwise fail collection on `import RPi.GPIO`.
+collect_ignore = ["pi_client/test_relay.py"]
