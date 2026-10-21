@@ -6,17 +6,20 @@ Full architecture, database schema, MQTT topic contracts, and the phased build p
 
 ## Status
 
+Detailed, up-to-date status and open items: [`docs/PROGRESS.md`](docs/PROGRESS.md).
+Ops runbook: [`docs/OPERATIONS.md`](docs/OPERATIONS.md). Wiring: [`docs/HARDWARE.md`](docs/HARDWARE.md).
+
 | Phase | What | Status |
 |---|---|---|
 | 0 | Oracle Cloud VPS, Docker | Done — running on `VM.Standard.E2.1.Micro` (1 OCPU/1GB), not the originally planned 6GB Ampere shape (unavailable — see plan's degradation notes). A retry script for upgrading later lives in `scripts/oci-retry-launch.ps1`. |
-| 1 | TimescaleDB schema | Done — schema, hypertable, continuous aggregates, seed data applied via Alembic (`migrations/`). |
-| 2 | Pi sensor reading | Done — `pi_client/sensor_reader.py` runs on `plant-sensor.timer` every 60s, reading the 6 wired moisture sensors. `watering_controller.py` (relay control, plus the `status` topic that sets `devices.status`) is blocked on relay hardware not being wired yet. |
-| 3 | Mosquitto + Command Dispatcher | Done — self-signed CA (IP SAN, no domain yet), per-user ACLs, `cmd_dispatcher/` polling `command_outbox` (idle — nothing creates commands until relays exist and a watering_config row is created). |
-| 4 | Consumer | Done — `consumer/` validates and persists readings/events/status to TimescaleDB, applies server-side calibration, raises threshold alerts and decides auto-watering. Deployed and verified end-to-end: the Pi's readings land in `sensor_readings`. |
-| 5 | FastAPI | Done — `api/` serves all plant/reading/watering/sensor/alert endpoints behind Telegram session auth. Deployed on the Docker network only (no published port). **Auth credentials are not set yet**, so it currently answers `/health` and locks everything else — see below. |
-| 6 | Telegram Bot | Done — `@WateringKLBot` on webhooks, serving `/start`, `/status` and `/water`. Deployed and verified through the real webhook path. |
+| 1 | TimescaleDB schema | Done — schema, hypertable, continuous aggregates, seed data applied via Alembic (`migrations/`, through `0003_relays`). |
+| 2 | Pi sensor reading + watering controller | Done — `sensor_reader.py` on `plant-sensor.timer` reads the 6 moisture sensors; `watering_controller.py` drives the relay board and publishes `status` (device shows `online`). No pumps attached yet, all plants `mode='manual'`. |
+| 3 | Mosquitto + Command Dispatcher | Done — self-signed CA (IP SAN), per-user ACLs, `cmd_dispatcher/` polling `command_outbox`. |
+| 4 | Consumer | Done — `consumer/` validates and persists readings/events/status to TimescaleDB, applies server-side calibration, raises threshold alerts and decides auto-watering. |
+| 5 | FastAPI | Done — `api/` behind Telegram session auth, Docker network only (reached via Nginx). Telegram credentials are set. |
+| 6 | Telegram Bot | Done — `@WateringKLBot` on webhooks, serving `/start`, `/status` and `/water`. |
 | 7 | Mini App | Not started. The bot's dashboard button stays hidden until `MINI_APP_URL` is set, rather than linking to a 404. |
-| 8 | Nginx + TLS | Done — `https://wateringkl.org` serves the API behind a real Let's Encrypt certificate, with automated renewal. Log caps, resource limits and DB backups from Phase 8 are still outstanding. |
+| 8 | Nginx + TLS + ops | Done — `https://wateringkl.org` with Let's Encrypt auto-renewal, nightly DB backups to Object Storage (restore tested), log caps, build-cache prune. |
 
 ## Public endpoint
 
