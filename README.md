@@ -24,8 +24,10 @@ Full architecture, database schema, MQTT topic contracts, and the phased build p
 Cloudflare's, and the A record is **DNS-only (grey cloud), deliberately not proxied** —
 proxying would break MQTT on 8883 and interfere with certificate renewal.
 
-Only Nginx is exposed. The API, Consumer, Dispatcher, broker and database have no
-published host ports and are reachable only on the Docker network.
+Only Nginx is exposed. The API, Consumer, Dispatcher and broker have no published host
+ports and are reachable only on the Docker network. The database is published on
+`127.0.0.1:5432` only — reachable from the VM itself (psql, an SSH tunnel), never from
+outside.
 
 | Path | Goes to |
 |---|---|
