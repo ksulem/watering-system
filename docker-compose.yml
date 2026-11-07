@@ -32,8 +32,14 @@ services:
       - work_mem=4MB
     volumes:
       - timescaledb_data:/var/lib/postgresql/data
+    # Loopback only. A plain "5432:5432" listens on every interface, and
+    # Docker-published ports bypass the host's iptables INPUT chain, so only the
+    # OCI security list stood between the database and the internet. Bound to
+    # 127.0.0.1, tools on the VM itself (psql, an SSH tunnel) still work; every
+    # service here connects over the Docker network as "timescaledb" and never
+    # used the host port.
     ports:
-      - "5432:5432"   # close externally after setup
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U plantuser -d plantmonitor"]
       interval: 5s
