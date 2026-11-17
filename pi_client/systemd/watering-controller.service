@@ -1,0 +1,36 @@
+[Unit]
+Description=Plant Watering Controller
+# Unlike plant-sensor, this process is long-lived and useless without a broker
+# connection, so wait for real network configuration rather than just the stack.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Type=notify, not simple: the process sends READY=1 only after the relay pins
+# are initialised de-energised and the MQTT task is running. With Type=simple,
+# systemd would consider the unit started at exec and could order a dependent
+# unit against a controller whose GPIO is still at power-on levels.
+Type=notify
+NotifyAccess=main
+ExecStart=/home/kwhatever/plant-monitor/pi_client/venv/bin/python3 /home/kwhatever/plant-monitor/pi_client/watering_controller.py
+WorkingDirectory=/home/kwhatever/plant-monitor/pi_client
+User=kwhatever
+EnvironmentFile=/home/kwhatever/plant-monitor/pi_client/.env
+# always, not on-failure: a clean exit here is still a device that has stopped
+# listening for commands. There is no correct reason for this process to end
+# while the Pi is up.
+Restart=always
+RestartSec=10
+# The controller pings the watchdog from its event loop every WatchdogSec/2. If
+# the loop wedges — hung GPIO call, blocked TLS write — pings stop and systemd
+# restarts the unit. Comfortably longer than a watering (MAX_WATERING_DURATION_SEC
+# defaults to 120s) is NOT required: the ping task is independent of the relay
+# task, so a running pump does not delay it.
+WatchdogSec=60
+# SIGTERM lets main()'s finally de-energise every pin and publish the offline
+# status. Long enough to also drain an in-flight watering.
+KillSignal=SIGTERM
+TimeoutStopSec=140
+
+[Install]
+WantedBy=multi-user.target

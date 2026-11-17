@@ -196,10 +196,15 @@ status, _ = call("PATCH", f"/plants/{tmp_id}/watering/config", token=TOKEN,
                  body={"mode": "auto"})
 check("PATCH cannot create a config", status, 404)
 
-# relay_channel 8 — nothing else claims it, and no relay is physically wired.
+# relay_channel 4 — nothing else claims it, and no relay is physically wired.
+# (Channel 8 used to be the safe pick, but 003_relays.sql assigns it to Монстера
+# / Monstera. Only 4 and 7 are still unwired; 7 is used below for the rejected-
+# device case. Re-check this against watering_config before changing it — the
+# UNIQUE (device_id, relay_channel) constraint turns a collision into a 409, and
+# POST /water on a live channel would water a real plant.)
 status, cfg = call("PUT", f"/plants/{tmp_id}/watering/config", token=TOKEN,
                    body={"device_id": device_id, "mode": "manual",
-                         "relay_channel": 8, "duration_sec": 5})
+                         "relay_channel": 4, "duration_sec": 5})
 check("PUT watering config", status, 200)
 if status == 200:
     created.append(f"watering_config plant_id={tmp_id}")

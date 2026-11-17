@@ -1,2 +1,19 @@
 spidev==3.6
 aiomqtt==2.5.1
+
+# RPi.GPIO is deliberately NOT pip-installed.
+#
+# Raspberry Pi OS trixie ships `python3-rpi-lgpio` (a shim over lgpio that
+# emulates the RPi.GPIO API) in place of the original RPi.GPIO, and that apt
+# package is what `import RPi.GPIO` resolves to on this Pi. Installing the PyPI
+# `rpi-lgpio` into the venv instead means compiling lgpio's C extension, which
+# needs swig — not present, and not worth adding a build toolchain to keep a
+# second copy of a library apt already maintains.
+#
+# The venv reaches the apt copy through a path file created at deploy time:
+#
+#     echo /usr/lib/python3/dist-packages > $VENV/lib/python3.13/site-packages/system-dist-packages.pth
+#
+# .pth entries are appended after the venv's own site-packages, so everything
+# pinned above still wins. Verified: aiomqtt and spidev resolve inside the venv,
+# RPi.GPIO resolves to /usr/lib/python3/dist-packages.

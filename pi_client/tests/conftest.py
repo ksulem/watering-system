@@ -16,10 +16,22 @@ sys.path.insert(0, str(PI_CLIENT_DIR))
 # control the mock's return values to test the MCP3008 bit math.
 sys.modules.setdefault("spidev", MagicMock())
 
+# RPi.GPIO is likewise Pi-only. watering_controller imports it at module scope,
+# so stub both the package and the submodule: `import RPi.GPIO as GPIO` resolves
+# through sys.modules["RPi.GPIO"]. Tests assert against the recorded calls, which
+# is why the relay level constants in relay.py are plain ints rather than
+# GPIO.HIGH/GPIO.LOW — a MagicMock attribute would make those assertions
+# vacuous, and an inverted level is precisely the bug worth catching.
+_rpi = MagicMock()
+sys.modules.setdefault("RPi", _rpi)
+sys.modules.setdefault("RPi.GPIO", _rpi.GPIO)
+
 # sensor_reader.py reads these from os.environ at module import time.
 # Real values don't matter for unit tests - individual tests override what
 # they care about via monkeypatch.
-os.environ.setdefault("DEVICE_ID", "test-device-id")
+# DEVICE_ID is a real UUID so watering_controller's events can be validated
+# against the Consumer's own pydantic model, which types device_id as UUID.
+os.environ.setdefault("DEVICE_ID", "260922ba-03f3-4c20-a7e4-1d7dbf8d9f42")
 os.environ.setdefault("SENSOR_CONFIG", "adc:0:moisture")
 os.environ.setdefault("PI_OUTBOX_DB", ":memory:")
 os.environ.setdefault("MQTT_HOST", "test-broker")

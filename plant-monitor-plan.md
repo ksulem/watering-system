@@ -1136,13 +1136,18 @@ Key responsibilities (Pi is purely reactive, but enforces physical safety locall
 - **Validate relay channel** — reject if not in `RELAY_PINS`, publish `watering_failed`
 - **Cap duration** — clamp to `MAX_WATERING_DURATION_SEC` regardless of command payload
 - **Tank-low lockout** — if water level sensor reads below `TANK_MIN_PCT`, refuse and publish `watering_failed` with `error: "tank_empty"` (optional if water level sensor is wired)
-- **Initialise all relay pins LOW at startup** before connecting to MQTT — ensures no relay fires in the window between GPIO init and first command delivery, and protects against phantom actuation if the process restarts with queued broker messages
-- Control GPIO relay — wrap execution in `asyncio.wait_for(timeout=MAX_WATERING_DURATION_SEC + 5)` and always drive the pin LOW in `finally` so the relay de-energises even on crash or timeout; publish `watering_started` immediately before activating, then `watering_completed` or `watering_failed` when done
+- **Initialise all relay pins to the de-energised level at startup** before connecting to MQTT — ensures no relay fires in the window between GPIO init and first command delivery, and protects against phantom actuation if the process restarts with queued broker messages. **The wired board is active-LOW: de-energised is HIGH, not LOW.** Use `GPIO.setup(pin, GPIO.OUT, initial=GPIO.HIGH)`, which sets the level as part of setup — a separate `setup()` then `output(HIGH)` leaves a brief window at the pin's default level. Never hardcode LOW/HIGH at call sites; derive both from one `RELAY_ACTIVE_HIGH = False` constant so a board swap is a one-line change.
+- Control GPIO relay — wrap execution in `asyncio.wait_for(timeout=MAX_WATERING_DURATION_SEC + 5)` and always drive the pin to the de-energised level (HIGH on this board) in `finally` so the relay de-energises even on crash or timeout; publish `watering_started` immediately before activating, then `watering_completed` or `watering_failed` when done
 - Drive output devices locally (LED colour, buzzer) — no backend commands needed
 - Publish result to `plant-monitor/{DEVICE_ID}/events`
 
 ```python
-RELAY_PINS = {1: 17, 2: 18, 3: 27, 4: 22, 5: 23, 6: 24, 7: 25, 8: 4}
+# Keys are relay board input labels (IN1..IN8), matching watering_config.relay_channel.
+# 4 and 7 are absent: no GPIO drives them and no solenoid is attached, so a command
+# naming one fails fast as `invalid_relay_channel`. Do NOT renumber to close the gap —
+# the numbers are the board silkscreen, which is what you read when debugging.
+RELAY_PINS = {1: 5, 2: 6, 3: 13, 5: 19, 6: 26, 8: 21}
+RELAY_ACTIVE_HIGH = False         # wired board energises on LOW
 MAX_WATERING_DURATION_SEC = 120   # hard cap — protects against flooding if cloud sends bad value
 TANK_MIN_PCT = 5.0                # refuse watering if tank this low (0 to disable)
 
@@ -1204,14 +1209,21 @@ async def handle_command(command: dict) -> None:
         await publish_event("watering_failed", command, error="relay_error")
         logger.exception("relay error on channel %d: %s", relay_channel, e)
     finally:
-        GPIO.output(RELAY_PINS[relay_channel], GPIO.LOW)   # safe regardless of outcome
+        GPIO.output(RELAY_PINS[relay_channel], DE_ENERGISED)  # safe regardless of outcome
         active_relays.discard(relay_channel)
 
-# Startup: drive ALL relay pins LOW before connecting to MQTT so no relay
-# fires between GPIO init and the first command. Prevents phantom actuation
-# if the process restarts while a retained command is in the broker session.
+# Startup: drive ALL relay pins to DE_ENERGISED before connecting to MQTT so no
+# relay fires between GPIO init and the first command. Prevents phantom actuation
+# if the process restarts while a command is queued in the broker session.
+#
+# NOTE this closes the window from *process start*, not from *power-on*. On an
+# active-low board the SoC's boot pulls (GPIO0-8 up, GPIO9-27 down) can leave
+# channels energised before any software runs. Measured on the fitted board and
+# it does not: its IN lines carry their own pull-up, which beats the internal
+# pull-down, so all six pins read high at power-on. See pi_client/relay.py for
+# the measurement — repeat it if the relay module is ever swapped.
 for pin in RELAY_PINS.values():
-    GPIO.setup(pin, GPIO.OUT, initial=GPIO.LOW)
+    GPIO.setup(pin, GPIO.OUT, initial=DE_ENERGISED)
 
 # Output devices respond to Pi's own state — no backend commands
 # LED: green=idle, yellow=watering, red=relay_error/tank_empty
