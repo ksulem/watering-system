@@ -8,21 +8,22 @@ Full architecture, database schema, MQTT topic contracts, and the phased build p
 
 | Phase | What | Status |
 |---|---|---|
-| 0 | Oracle Cloud VPS, Docker | Done — running on `VM.Standard.E2.1.Micro` (1 OCPU/1GB), not the originally planned 6GB Ampere shape (unavailable — see plan's degradation notes). A retry script for upgrading later lives in `scripts/oci-retry-launch.ps1`. |
-| 1 | TimescaleDB schema | Done — schema, hypertable, continuous aggregates, seed data applied via Alembic (`migrations/`). |
-| 2 | Pi sensor reading | Done — `pi_client/sensor_reader.py` runs on `plant-sensor.timer` every 60s, reading the 6 wired moisture sensors. `watering_controller.py` (relay control, plus the `status` topic that sets `devices.status`) is blocked on relay hardware not being wired yet. |
-| 3 | Mosquitto + Command Dispatcher | Done — self-signed CA (IP SAN, no domain yet), per-user ACLs, `cmd_dispatcher/` polling `command_outbox` (idle — nothing creates commands until relays exist and a watering_config row is created). |
-| 4 | Consumer | Done — `consumer/` validates and persists readings/events/status to TimescaleDB, applies server-side calibration, raises threshold alerts and decides auto-watering. Deployed and verified end-to-end: the Pi's readings land in `sensor_readings`. |
-| 5 | FastAPI | Done — `api/` serves all plant/reading/watering/sensor/alert endpoints behind Telegram session auth. Deployed on the Docker network only (no published port). **Auth credentials are not set yet**, so it currently answers `/health` and locks everything else — see below. |
-| 6 | Telegram Bot | Done — `@WateringKLBot` on webhooks, serving `/start`, `/status` and `/water`. Deployed and verified through the real webhook path. |
+| 0 | Oracle Cloud VPS, Docker | Done. Since 2026-11-17 it runs on the originally planned Ampere shape, `VM.Standard.A1.Flex` (1 OCPU / 6 GB, Oracle Linux 9 arm64, Always Free), shared with the recovery bot. It started on a `VM.Standard.E2.1.Micro` (1 GB) while A1 capacity was unavailable. |
+| 1 | TimescaleDB schema | Done — schema, hypertable, continuous aggregates, seed data applied via Alembic (`migrations/`, through `0003_relays`). |
+| 2 | Pi sensor reading + watering controller | Done — `sensor_reader.py` on `plant-sensor.timer` reads the 6 moisture sensors; `watering_controller.py` drives the relay board and publishes `status` (device shows `online`). No pumps attached yet, all plants `mode='manual'`. |
+| 3 | Mosquitto + Command Dispatcher | Done — self-signed CA, broker at `mqtt.wateringkl.org:8883` (DNS + IP SANs), per-user ACLs, `cmd_dispatcher/` polling `command_outbox`. |
+| 4 | Consumer | Done — `consumer/` validates and persists readings/events/status to TimescaleDB, applies server-side calibration, raises threshold alerts and decides auto-watering. |
+| 5 | FastAPI | Done — `api/` behind Telegram session auth, Docker network only (reached via Nginx). Telegram credentials are set. |
+| 6 | Telegram Bot | Done — `@WateringKLBot` on webhooks, serving `/start`, `/status` and `/water`. |
 | 7 | Mini App | Not started. The bot's dashboard button stays hidden until `MINI_APP_URL` is set, rather than linking to a 404. |
-| 8 | Nginx + TLS | Done — `https://wateringkl.org` serves the API behind a real Let's Encrypt certificate, with automated renewal. Log caps, resource limits and DB backups from Phase 8 are still outstanding. |
+| 8 | Nginx + TLS + ops | Done — `https://wateringkl.org` with Let's Encrypt auto-renewal, nightly DB backups to Object Storage (restore tested), log caps, build-cache prune. |
 
 ## Public endpoint
 
-`https://wateringkl.org` → `92.5.47.47`. Domain registered at Cloudflare; DNS is
-Cloudflare's, and the A record is **DNS-only (grey cloud), deliberately not proxied** —
-proxying would break MQTT on 8883 and interfere with certificate renewal.
+`https://wateringkl.org` → `130.61.131.63`, and so does `mqtt.wateringkl.org`, which the Pi
+uses for MQTT. Domain registered at Cloudflare; DNS is Cloudflare's, and both A records are
+**DNS-only (grey cloud), deliberately not proxied**. Proxying would break MQTT on 8883 and
+interfere with certificate renewal.
 
 Only Nginx is exposed. The API, Consumer, Dispatcher and broker have no published host
 ports and are reachable only on the Docker network. The database is published on
@@ -62,7 +63,7 @@ Two deviations from the plan document, both deliberate:
   zone's negative TTL — 30 minutes on a fresh Cloudflare zone — long after the record is
   live everywhere else. Let's Encrypt resolves from its own servers, so the local cache
   is irrelevant and actively misleading. Use
-  `curl --resolve wateringkl.org:443:92.5.47.47 …` to test from a machine with a stale
+  `curl --resolve wateringkl.org:443:130.61.131.63 …` to test from a machine with a stale
   cache.
 
 ### The API is deployed but locked
