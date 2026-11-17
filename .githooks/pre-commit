@@ -3,6 +3,16 @@
 # (one-time per clone — see README's "Linting" section).
 set -eu
 
+# Prefer the project venv's ruff: it is the version pinned in requirements-dev.txt,
+# and it works without anything on PATH (including commits from the VS Code Git
+# panel). Called by relative path, not added to PATH: under Git for Windows a
+# hook's $PWD is "C:/...", and that colon splits a PATH entry in two. Hooks run
+# from the repo root and this one never cds, so the relative path is stable.
+RUFF=ruff
+for r in .venv/Scripts/ruff.exe .venv/bin/ruff; do
+    if [ -x "$r" ]; then RUFF=$r; break; fi
+done
+
 # `pip install --user` on Windows puts console scripts (ruff.exe) under the
 # Python Scripts dir, which usually isn't on PATH by default. Append known
 # per-user pip script locations as a fallback rather than modifying the
@@ -14,10 +24,10 @@ if [ -n "${APPDATA:-}" ]; then
 fi
 PATH="$PATH:$HOME/.local/bin"
 
-if ! command -v ruff >/dev/null 2>&1; then
-    echo "pre-commit: ruff not found on PATH — install with 'pip install -r requirements-dev.txt'" >&2
+if ! command -v "$RUFF" >/dev/null 2>&1; then
+    echo "pre-commit: ruff not found in .venv or on PATH — install with 'pip install -r requirements-dev.txt'" >&2
     exit 1
 fi
 
 echo "pre-commit: running ruff check..."
-ruff check .
+"$RUFF" check .
